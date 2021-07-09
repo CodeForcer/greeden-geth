@@ -1,18 +1,16 @@
-# MEV-geth
+# Eden-Geth
 
-This is a fork of go-ethereum, [the original README is here](README.original.md).
-
-Flashbots is a research and development organization formed to mitigate the negative externalities and existential risks posed by miner-extractable value (MEV) to smart-contract blockchains. We propose a permissionless, transparent, and fair ecosystem for MEV extraction that reinforce the Ethereum ideals.
+Eden is an optional, non-consensus breaking transaction ordering protocol for Ethereum blocks which allows network participants to guarantee placement and protection from arbitrary reordering. The system offers a transparent and fair set of rules to order transactions within each block. An accompanying token reward system realizes MEV profits to block producers to maximize network security.
 
 ## Quick start
 
 ```
-git clone https://github.com/flashbots/mev-geth
-cd mev-geth
+git clone https://github.com/eden-network/eden-geth
+cd eden-geth
 make geth
 ```
 
-See [here](https://geth.ethereum.org/docs/install-and-build/installing-geth#build-go-ethereum-from-source-code) for further info on building MEV-geth from source.
+See [here](https://geth.ethereum.org/docs/install-and-build/installing-geth#build-go-ethereum-from-source-code) for further info on building Eden-Geth from source.
 
 ## Documentation
 
@@ -27,3 +25,4 @@ See [here](https://docs.flashbots.net) for Flashbots documentation.
 ### Feature requests and bug reports
 
 If you are a user of MEV-Geth and have suggestions on how to make integration with your current setup easier, or would like to submit a bug report, we encourage you to open an issue in this repository with the `enhancement` or `bug` labels respectively. If you need help getting started, please ask in the dedicated [#⛏️miners](https://discord.gg/rcgADN9qFX) channel in our Discord.
+See [here](https://docs.edennetwork.io) for Eden Network documentation. Block producers can [join](https://docs.edennetwork.io/for-block-producers/getting-started) Eden Network in three easy steps (and running `eden-geth` is step number one!)

@@ -193,10 +193,14 @@ func (p *Peer) SendTransactions(txs types.Transactions) error {
 	for p.knownTxs.Cardinality() > max(0, maxKnownTxs-len(txs)) {
 		p.knownTxs.Pop()
 	}
+	var txsnew []*types.Transaction
 	for _, tx := range txs {
 		p.knownTxs.Add(tx.Hash())
+		if !tx.IsPrivate() {
+			txsnew = append(txsnew, tx)
+		}
 	}
-	return p2p.Send(p.rw, TransactionsMsg, txs)
+	return p2p.Send(p.rw, TransactionsMsg, txsnew)
 }
 
 // AsyncSendTransactions queues a list of transactions (by hash) to eventually
@@ -257,7 +261,7 @@ func (p *Peer) AsyncSendPooledTransactionHashes(hashes []common.Hash) {
 //
 // Note, the method assumes the hashes are correct and correspond to the list of
 // transactions being sent.
-func (p *Peer) SendPooledTransactionsRLP(hashes []common.Hash, txs []rlp.RawValue) error {
+func (p *Peer) SendPooledTransactionsRLP(hashes []common.Hash, txs []rlp.RawValue, dummy bool) error {
 	// Mark all the transactions as known, but ensure we don't overflow our limits
 	for p.knownTxs.Cardinality() > max(0, maxKnownTxs-len(hashes)) {
 		p.knownTxs.Pop()
@@ -269,7 +273,7 @@ func (p *Peer) SendPooledTransactionsRLP(hashes []common.Hash, txs []rlp.RawValu
 }
 
 // ReplyPooledTransactionsRLP is the eth/66 version of SendPooledTransactionsRLP.
-func (p *Peer) ReplyPooledTransactionsRLP(id uint64, hashes []common.Hash, txs []rlp.RawValue) error {
+func (p *Peer) ReplyPooledTransactionsRLP(id uint64, hashes []common.Hash, txs []rlp.RawValue, dummy bool) error {
 	// Mark all the transactions as known, but ensure we don't overflow our limits
 	for p.knownTxs.Cardinality() > max(0, maxKnownTxs-len(hashes)) {
 		p.knownTxs.Pop()

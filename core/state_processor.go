@@ -102,6 +102,10 @@ func applyTransaction(msg types.Message, config *params.ChainConfig, bc ChainCon
 	if err != nil {
 		return nil, err
 	}
+	// if this is a reverted tx but user don't want to be included, return a fake error.
+	if result.Failed() && msg.NotAllowToFail() {
+		return nil, ErrTxTypeNotSupported
+	}
 
 	// Update the state with pending changes.
 	var root []byte

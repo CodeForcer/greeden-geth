@@ -47,6 +47,14 @@ const (
 	DynamicFeeTxType
 )
 
+// user must stake more than 100 EDEN to enter the third priority
+const minEdenStaked = 100
+var minStaked *big.Int
+func init() {
+	minEdenAmount := big.NewInt(minEdenStaked)
+	minStaked = minEdenAmount.Mul(minEdenAmount, new(big.Int).SetInt64(1000000000000000000))
+}
+
 // Transaction is an Ethereum transaction.
 type Transaction struct {
 	inner TxData    // Consensus contents of a transaction
@@ -56,6 +64,10 @@ type Transaction struct {
 	hash atomic.Value
 	size atomic.Value
 	from atomic.Value
+	stake atomic.Value
+	private int32
+	notAllowedToFailByUser int32
+	slotTx int32
 }
 
 // NewTx creates a new transaction.
@@ -281,6 +293,44 @@ func (tx *Transaction) Value() *big.Int { return new(big.Int).Set(tx.inner.value
 // Nonce returns the sender account nonce of the transaction.
 func (tx *Transaction) Nonce() uint64 { return tx.inner.nonce() }
 
+func (tx *Transaction) From() common.Address {
+	if sc := tx.from.Load(); sc != nil {
+		sigCache := sc.(sigCache)
+		// If the signer used to derive from in a previous
+		// call is not the same as used current, invalidate
+		// the cache.
+		return sigCache.from
+	}
+	return [20]byte{}
+}
+
+func (tx *Transaction) MinStakeSatisfied(stake *big.Int) bool {
+	return stake.Cmp(minStaked) >= 0
+}
+
+func (tx *Transaction) ToSlot(slotAddress map[common.Address]bool) bool {
+	toAddress := tx.To()
+	// contract-creation transactions
+	if toAddress == nil {
+		return false
+	}
+	 _, ok := slotAddress[*toAddress]
+	 return ok
+}
+
+func (tx *Transaction) SetStake(stake *big.Int) {
+	tx.stake.Store(stake)
+}
+func (tx *Transaction) Stake() *big.Int {
+	s := tx.stake.Load()
+	if s != nil {
+		return s.(*big.Int)
+	}
+	zero := big.NewInt(0)
+	tx.stake.Store(zero)
+	return zero
+}
+
 // To returns the recipient address of the transaction.
 // For contract-creation transactions, To returns nil.
 func (tx *Transaction) To() *common.Address {
@@ -291,6 +341,43 @@ func (tx *Transaction) To() *common.Address {
 	}
 	cpy := *ito
 	return &cpy
+}
+
+func (tx *Transaction) SetPrivate(val bool) {
+	if val {
+		atomic.StoreInt32(&tx.private, 1)
+	} else {
+		atomic.StoreInt32(&tx.private, 0)
+	}
+}
+func (tx *Transaction) IsPrivate() bool {
+	v := atomic.LoadInt32(&tx.private)
+	return v == 1
+}
+
+func (tx *Transaction) SetNotAllowedToFailByUser(val bool) {
+	if val {
+		atomic.StoreInt32(&tx.notAllowedToFailByUser, 1)
+	} else {
+		atomic.StoreInt32(&tx.notAllowedToFailByUser, 0)
+	}
+}
+func (tx *Transaction) NotAllowedToFailByUser() bool {
+	v := atomic.LoadInt32(&tx.notAllowedToFailByUser)
+	return v == 1
+}
+
+func (tx *Transaction) SetSlotTx(val bool) {
+	if val {
+		atomic.StoreInt32(&tx.slotTx, 1)
+	} else {
+		atomic.StoreInt32(&tx.slotTx, 0)
+	}
+}
+
+func (tx *Transaction) NotAllowedToFail() bool {
+	return atomic.LoadInt32(&tx.notAllowedToFailByUser) == 1 &&
+		atomic.LoadInt32(&tx.slotTx) == 1
 }
 
 // Cost returns gas * gasPrice + value.
@@ -565,6 +652,124 @@ func (t *TransactionsByPriceAndNonce) Pop() {
 	heap.Pop(&t.heads)
 }
 
+// TxByStakeAndTime implements both the sort and the heap interface, making it useful
+// for all at once sorting as well as individually adding and removing elements.
+type TxByStakeAndTime []*TxWithMinerFee
+
+func (s TxByStakeAndTime) Len() int { return len(s) }
+func (s TxByStakeAndTime) Less(i, j int) bool {
+	// If the stake are equal, use the time the transaction was first seen for
+	// deterministic sorting
+	iStaked := s[i].tx.Stake()
+	jStaked := s[j].tx.Stake()
+	if iStaked.Cmp(minStaked) >= 0 && jStaked.Cmp(minStaked) >= 0{
+		cmp := iStaked.Cmp(jStaked)
+		if cmp == 0 {
+			return s[i].tx.time.Before(s[j].tx.time)
+		}
+		return cmp > 0
+	} else if iStaked.Cmp(minStaked) >= 0 {
+		return true
+	} else if jStaked.Cmp(minStaked) >= 0 {
+		return false
+	} else {
+		cmp := s[i].minerFee.Cmp(s[j].minerFee)
+		if cmp == 0 {
+			return s[i].tx.time.Before(s[j].tx.time)
+		}
+		return cmp > 0
+	}
+}
+
+func (s TxByStakeAndTime) Swap(i, j int) { s[i], s[j] = s[j], s[i] }
+
+func (s *TxByStakeAndTime) Push(x interface{}) {
+	*s = append(*s, x.(*TxWithMinerFee))
+}
+
+func (s *TxByStakeAndTime) Pop() interface{} {
+	old := *s
+	n := len(old)
+	x := old[n-1]
+	*s = old[0 : n-1]
+	return x
+}
+
+// TransactionsByStakeAndNonce represents a set of transactions that can return
+// transactions in a profit-maximizing sorted order, while supporting removing
+// entire batches of transactions for non-executable accounts.
+type TransactionsByStakeAndNonce struct {
+	txs    map[common.Address]Transactions // Per account nonce-sorted list of transactions
+	heads  TxByStakeAndTime                // Next transaction for each unique account (stake heap)
+	signer Signer                          // Signer for the set of transactions
+	baseFee *big.Int                        // Current base fee
+}
+
+// NewTransactionsByStakeAndNonce creates a transaction set that can retrieve
+// price sorted transactions in a nonce-honouring way.
+//
+// Note, the input map is reowned so the caller should not interact any more with
+// if after providing it to the constructor.
+func NewTransactionsByStakeAndNonce(signer Signer, txs map[common.Address]Transactions, baseFee *big.Int) *TransactionsByStakeAndNonce {
+	// Initialize a price and received time based heap with the head transactions
+	heads := make(TxByStakeAndTime, 0, len(txs))
+	for from, accTxs := range txs {
+		acc, _ := Sender(signer, accTxs[0])
+		wrapped, err := NewTxWithMinerFee(accTxs[0], baseFee)
+		// Remove transaction if sender doesn't match from, or if wrapping fails.
+		if acc != from || err != nil {
+			delete(txs, from)
+			continue
+		}
+		heads = append(heads, wrapped)
+		txs[from] = accTxs[1:]
+	}
+
+	heap.Init(&heads)
+
+	// Assemble and return the transaction set
+	return &TransactionsByStakeAndNonce{
+		txs:    txs,
+		heads:  heads,
+		signer: signer,
+		baseFee: baseFee,
+	}
+}
+
+// Peek returns the next transaction by stake.
+func (t *TransactionsByStakeAndNonce) Peek() *Transaction {
+	if len(t.heads) == 0 {
+		return nil
+	}
+	return t.heads[0].tx
+}
+
+// Shift replaces the current best head with the next one from the same account.
+func (t *TransactionsByStakeAndNonce) Shift() {
+	acc, _ := Sender(t.signer, t.heads[0].tx)
+	if txs, ok := t.txs[acc]; ok && len(txs) > 0 {
+		if wrapped, err := NewTxWithMinerFee(txs[0], t.baseFee); err == nil {
+			t.heads[0], t.txs[acc] = wrapped, txs[1:]
+			heap.Fix(&t.heads, 0)
+			return
+		}
+	}
+	heap.Pop(&t.heads)
+}
+
+// Pop removes the best transaction, *not* replacing it with the next one from
+// the same account. This should be used when a transaction cannot be executed
+// and hence all subsequent ones should be discarded from the same account.
+func (t *TransactionsByStakeAndNonce) Pop() {
+	heap.Pop(&t.heads)
+}
+
+type TransactionsSorted interface {
+	Pop()
+	Shift()
+	Peek() *Transaction
+}
+
 // Message is a fully derived transaction and implements core.Message
 //
 // NOTE: In a future PR this will be removed.
@@ -580,6 +785,7 @@ type Message struct {
 	data       []byte
 	accessList AccessList
 	isFake     bool
+	notAllowToFail bool
 }
 
 func NewMessage(from common.Address, to *common.Address, nonce uint64, amount *big.Int, gasLimit uint64, gasPrice, gasFeeCap, gasTipCap *big.Int, data []byte, accessList AccessList, isFake bool) Message {
@@ -595,6 +801,7 @@ func NewMessage(from common.Address, to *common.Address, nonce uint64, amount *b
 		data:       data,
 		accessList: accessList,
 		isFake:     isFake,
+		notAllowToFail: false,
 	}
 }
 
@@ -611,6 +818,7 @@ func (tx *Transaction) AsMessage(s Signer, baseFee *big.Int) (Message, error) {
 		data:       tx.Data(),
 		accessList: tx.AccessList(),
 		isFake:     false,
+		notAllowToFail: tx.NotAllowedToFail(),
 	}
 	// If baseFee provided, set gasPrice to effectiveGasPrice.
 	if baseFee != nil {
@@ -632,6 +840,7 @@ func (m Message) Nonce() uint64          { return m.nonce }
 func (m Message) Data() []byte           { return m.data }
 func (m Message) AccessList() AccessList { return m.accessList }
 func (m Message) IsFake() bool           { return m.isFake }
+func (m Message) NotAllowToFail() bool       { return m.notAllowToFail }
 
 type MevBundle struct {
 	Txs               Transactions

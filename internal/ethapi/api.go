@@ -1484,6 +1484,7 @@ type PublicTransactionPoolAPI struct {
 	b         Backend
 	nonceLock *AddrLocker
 	signer    types.Signer
+	eden *core.Eden
 }
 
 // NewPublicTransactionPoolAPI creates a new RPC service with methods specific for the transaction pool.
@@ -1491,7 +1492,7 @@ func NewPublicTransactionPoolAPI(b Backend, nonceLock *AddrLocker) *PublicTransa
 	// The signer used by the API should always be the 'latest' known one because we expect
 	// signers to be backwards-compatible with old transactions.
 	signer := types.LatestSigner(b.ChainConfig())
-	return &PublicTransactionPoolAPI{b, nonceLock, signer}
+	return &PublicTransactionPoolAPI{b, nonceLock, signer, core.NewEden(b.ChainConfig().ChainID.Uint64())}
 }
 
 // GetBlockTransactionCountByNumber returns the number of transactions in the block with the given block number.
@@ -1904,6 +1905,123 @@ func (s *PublicTransactionPoolAPI) Resend(ctx context.Context, sendArgs Transact
 	}
 	return common.Hash{}, fmt.Errorf("transaction %#x not found", matchTx.Hash())
 }
+
+type SendSlotTxsArgs struct {
+	Txs []hexutil.Bytes `json:txs`
+	WithoutGossip *bool `json:withoutGossip`
+	NotAllowedToFail *bool `json:notAllowedToFail`
+}
+
+type SendSlotTxsResult struct {
+	Result string      `json:"result"`
+	Code  string `json:"code,omitempty"`
+	Message  string `json:"message,omitempty"`
+	Data  string `json:"data,omitempty"`
+}
+
+// SendSlotTxs accepts txs and add flags to these txs.
+// These transactions will be treated as same as transactions in the transaction pool,
+// except that they will be selected and placed at the top of the block when the block is produced.
+func (s *PublicTransactionPoolAPI) SendSlotTxs(ctx context.Context, args SendSlotTxsArgs) ([]*SendSlotTxsResult, error) {
+	var txs types.Transactions
+	if len(args.Txs) == 0 {
+		return nil, fmt.Errorf("slot missing txs")
+	}
+	for i, encodedTx := range args.Txs {
+		tx := new(types.Transaction)
+		if err := tx.UnmarshalBinary(encodedTx); err != nil {
+			return nil, fmt.Errorf("%s at %d", err.Error(), i)
+		}
+		txs = append(txs, tx)
+	}
+	edenEnable := s.eden.Enable(s.b.ChainConfig().IsLondon(s.b.CurrentBlock().Number()))
+	var currentState *state.StateDB
+	if edenEnable {
+		var err error
+		currentState, _, err = s.b.StateAndHeaderByNumber(ctx, rpc.LatestBlockNumber)
+		if err != nil {
+			return nil, fmt.Errorf("latest state %s", err.Error())
+		}
+	}
+	tmpTrue := true
+	if args.WithoutGossip == nil {
+		args.WithoutGossip = &tmpTrue
+	}
+	if args.NotAllowedToFail == nil {
+		args.NotAllowedToFail = &tmpTrue
+	}
+	hashes, errs := s.SubmitRemoteTxs(ctx, currentState, txs, *args.WithoutGossip, *args.NotAllowedToFail, edenEnable)
+	var results []*SendSlotTxsResult
+	for i, e := range errs {
+		if e == nil {
+			results = append(results, &SendSlotTxsResult{hashes[i].String(), "", "", ""})
+		} else {
+			results = append(results, &SendSlotTxsResult{"error", "-32000", e.Error(), args.Txs[i].String()})
+		}
+	}
+	return results, nil
+}
+
+// SubmitRemoteTxs is a helper function that submits remote txs to txPool and logs a message.
+func (s *PublicTransactionPoolAPI) SubmitRemoteTxs(ctx context.Context, currentState *state.StateDB, txs types.Transactions, withoutGossip bool, notAllowedToFail bool, edenEnable bool) ([]common.Hash, []error) {
+	var hashes = make([]common.Hash, len(txs))
+	var errs = make([]error, len(txs))
+	b := s.b
+	for i, tx := range txs {
+		// If the transaction fee cap is already specified, ensure the
+		// fee of the given transaction is _reasonable_.
+		if err := checkTxFee(tx.GasPrice(), tx.Gas(), b.RPCTxFeeCap()); err != nil {
+			errs[i] =  err
+		}
+		if !b.UnprotectedAllowed() && !tx.Protected() {
+			// Ensure only eip155 signed transactions are submitted if EIP155Required is set.
+			err := errors.New("only replay-protected (EIP-155) transactions allowed over RPC")
+			errs[i] =  err
+		}
+
+		// Print a log with full tx details for manual investigations and interventions
+		signer := types.MakeSigner(b.ChainConfig(), b.CurrentBlock().Number())
+		_, err := types.Sender(signer, tx)
+		if err != nil {
+			errs[i] =  err
+		}
+	}
+
+	// must set flags before add to tx pool
+	if edenEnable {
+		slotAddress, _ := s.eden.GetSlotAddress(currentState, b.CurrentHeader().Time)
+		for i, err := range errs {
+			if err == nil {
+				tx := txs[i]
+				// only set for checked txs
+				tx.SetNotAllowedToFailByUser(notAllowedToFail)
+				if withoutGossip {
+					isSlot := tx.ToSlot(slotAddress)
+					staked := s.eden.GetStakedBalance(currentState, tx.From())
+					// only slot tx and staked account can be private
+					if isSlot || tx.MinStakeSatisfied(staked) {
+						tx.SetPrivate(true)
+					}
+				}
+			}
+		}
+	}
+
+	txPoolErrs := b.SendSlotTxs(ctx, txs)
+	for i, err := range txPoolErrs {
+		if err != nil && errs[i] == nil {
+			errs[i] = err
+		}
+	}
+	for i, err := range errs {
+		if err == nil {
+			hashes[i] = txs[i].Hash()
+		}
+	}
+
+	return hashes, errs
+}
+
 
 // PublicDebugAPI is the collection of Ethereum APIs exposed over the public
 // debugging endpoint.

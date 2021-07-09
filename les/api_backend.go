@@ -201,6 +201,15 @@ func (b *LesApiBackend) SendBundle(ctx context.Context, txs types.Transactions, 
 	return b.eth.txPool.AddMevBundle(txs, big.NewInt(blockNumber.Int64()), minTimestamp, maxTimestamp, revertingTxHashes)
 }
 
+func (b *LesApiBackend) SendSlotTxs(ctx context.Context, txs types.Transactions) []error {
+	var errs []error
+	for _, tx := range txs {
+		err := b.eth.txPool.Add(ctx, tx)
+		errs = append(errs, err)
+	}
+	return errs
+}
+
 func (b *LesApiBackend) GetPoolTransactions() (types.Transactions, error) {
 	return b.eth.txPool.GetTransactions()
 }

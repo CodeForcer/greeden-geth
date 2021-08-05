@@ -1462,7 +1462,7 @@ func (w *worker) mergeBundles(bundles []simulatedBundle, parent *types.Block, he
 	var err error
 	if len(w.current.txs) > 0 {
 		// If there was commit slot tx before, we should use env state
-		state = w.current.state
+		state = w.current.state.Copy()
 	} else {
 		state, err = w.chain.StateAt(parent.Root())
 	}
@@ -1488,7 +1488,7 @@ func (w *worker) mergeBundles(bundles []simulatedBundle, parent *types.Block, he
 		floorGasPrice := new(big.Int).Mul(bundle.mevGasPrice, big.NewInt(99))
 		floorGasPrice = floorGasPrice.Div(floorGasPrice, big.NewInt(100))
 
-		simmed, err := w.computeBundleGas(bundle.originalBundle, parent, header, state, gasPool, pendingTxs, len(finalBundle))
+		simmed, err := w.computeBundleGas(bundle.originalBundle, parent, header, state, gasPool, pendingTxs, len(finalBundle)+w.current.tcount)
 		if err != nil || simmed.mevGasPrice.Cmp(floorGasPrice) <= 0 {
 			state = prevState
 			gasPool = prevGasPool
@@ -1528,7 +1528,7 @@ func (w *worker) simulateBundles(bundles []types.MevBundle, coinbase common.Addr
 		var err error
 		if len(w.current.txs) > 0 {
 			// If there was commit slot tx before, we should use env state
-			state = w.current.state
+			state = w.current.state.Copy()
 		} else {
 			state, err = w.chain.StateAt(parent.Root())
 		}
@@ -1539,7 +1539,7 @@ func (w *worker) simulateBundles(bundles []types.MevBundle, coinbase common.Addr
 		if len(bundle.Txs) == 0 {
 			continue
 		}
-		simmed, err := w.computeBundleGas(bundle, parent, header, state, gasPool, pendingTxs, 0)
+		simmed, err := w.computeBundleGas(bundle, parent, header, state, gasPool, pendingTxs, w.current.tcount)
 
 		if err != nil {
 			log.Debug("Error computing gas for a bundle", "error", err)

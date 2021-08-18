@@ -1308,7 +1308,7 @@ func (w *worker) commitNewWork(interrupt *int32, noempty bool, timestamp int64) 
 		if w.commitBundle(bundleTxs, w.coinbase, interrupt) {
 			return
 		}
-		w.current.profit.Add(w.current.profit, bundle.totalEth)
+		w.current.profit.Add(w.current.profit, bundle.ethSentToCoinbase)
 	}
 
 	if !edenEnable {

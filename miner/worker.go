@@ -187,7 +187,7 @@ type worker struct {
 	// External functions
 	isLocalBlock func(block *types.Block) bool // Function used to determine whether the specified block is mined by local miner.
 
-	eden *core.Eden
+	eden      *core.Eden
 	flashbots *flashbotsData
 
 	// Test hooks
@@ -243,7 +243,7 @@ func newWorker(config *Config, chainConfig *params.ChainConfig, engine consensus
 		startCh:            make(chan struct{}, 1),
 		resubmitIntervalCh: make(chan time.Duration),
 		resubmitAdjustCh:   make(chan *intervalAdjust, resubmitAdjustChanSize),
-		eden: core.NewEden(chainConfig.ChainID.Uint64()),
+		eden:               core.NewEden(chainConfig.ChainID.Uint64()),
 		flashbots:          flashbots,
 	}
 	// Subscribe NewTxsEvent for tx pool
@@ -552,7 +552,7 @@ func (w *worker) mainLoop() {
 					txs[acc] = append(txs[acc], tx)
 				}
 				var txset types.TransactionsSorted
-				if w.eden.Enable(w.chainConfig.IsLondon(w.chain.CurrentBlock().Number())) {
+				if w.flashbots.isEden && w.eden.Enable(w.chainConfig.IsLondon(w.chain.CurrentBlock().Number())) {
 					// use parent state for ordering
 					parentState, err := w.chain.StateAt(w.chain.CurrentBlock().Root())
 					if err != nil {
@@ -607,7 +607,7 @@ func removeTx(txs types.Transactions, idxs []int) types.Transactions {
 	return ret
 }
 
-func splitPendingToSlots(pending map[common.Address]types.Transactions, slotsAddress map[common.Address]bool) (map[common.Address]types.Transactions, map[common.Address][]int){
+func splitPendingToSlots(pending map[common.Address]types.Transactions, slotsAddress map[common.Address]bool) (map[common.Address]types.Transactions, map[common.Address][]int) {
 	slotsTx := make(map[common.Address]types.Transactions)
 	slotsIndex := make(map[common.Address][]int)
 	// check every tx
@@ -1221,7 +1221,7 @@ func (w *worker) commitNewWork(interrupt *int32, noempty bool, timestamp int64) 
 	}
 	var parentState *state.StateDB
 	var localTxs, remoteTxs map[common.Address]types.Transactions
-	edenEnable := w.eden.Enable(w.chainConfig.IsLondon(header.Number))
+	edenEnable := w.flashbots.isEden && w.eden.Enable(w.chainConfig.IsLondon(header.Number))
 	if !edenEnable {
 		// Split the pending transactions into locals and remotes
 		localTxs, remoteTxs = make(map[common.Address]types.Transactions), pending
@@ -1366,15 +1366,15 @@ func (w *worker) commit(uncles []*types.Header, interval func(), update bool, st
 }
 
 type splitSlotTxsResult struct {
-	underGasLimitTxs types.Transactions
+	underGasLimitTxs   types.Transactions
 	surpassGasLimitTxs types.Transactions
-	totalGasUsed      uint64
+	totalGasUsed       uint64
 }
 
 // Split slot txs into 2 parts, under gas limit and surpass part
 func (w *worker) splitSlotTxByGasLimit(txs types.Transactions, header *types.Header,
 	state *state.StateDB, gasPool *core.GasPool, currentTxCount int) splitSlotTxsResult {
-	slotsTxs:= make(map[common.Address]types.Transactions)
+	slotsTxs := make(map[common.Address]types.Transactions)
 	for _, tx := range txs {
 		fromAddr := tx.From()
 		slotsTxs[fromAddr] = append(slotsTxs[fromAddr], tx)
@@ -1432,7 +1432,6 @@ func (w *worker) splitSlotTxByGasLimit(txs types.Transactions, header *types.Hea
 		totalGasUsed:       totalGasUsed,
 	}
 }
-
 
 type simulatedBundle struct {
 	mevGasPrice       *big.Int

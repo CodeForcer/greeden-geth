@@ -1221,7 +1221,7 @@ func (w *worker) commitNewWork(interrupt *int32, noempty bool, timestamp int64) 
 	}
 	var parentState *state.StateDB
 	var localTxs, remoteTxs map[common.Address]types.Transactions
-	edenEnable := w.eden.Enable(w.chainConfig.IsLondon(header.Number))
+	edenEnable := (w.eden.Enable(w.chainConfig.IsLondon(header.Number)) && w.flashbots.isEden)
 	if !edenEnable {
 		// Split the pending transactions into locals and remotes
 		localTxs, remoteTxs = make(map[common.Address]types.Transactions), pending

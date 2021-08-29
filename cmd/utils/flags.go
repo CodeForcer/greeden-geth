@@ -460,9 +460,14 @@ var (
 		Usage: "Time interval to recreate the block being mined",
 		Value: ethconfig.Defaults.Miner.Recommit,
 	}
-	MinerMaxMergedBundles = cli.IntFlag{
+	MinerMaxFlashbotWorkers = cli.IntFlag{
 		Name:  "miner.maxmergedbundles",
 		Usage: "flashbots - The maximum amount of bundles to merge. The miner will run this many workers in parallel to calculate if the full block is more profitable with these additional bundles.",
+		Value: 3,
+	}
+	MinerMaxEdenWorkers = cli.IntFlag{
+		Name:  "miner.maxedenbundles",
+		Usage: "eden - The maximum amount of bundles to merge. The miner will run this many workers in parallel to calculate if the full block is more profitable with these additional bundles.",
 		Value: 3,
 	}
 	MinerNoVerfiyFlag = cli.BoolFlag{
@@ -1410,7 +1415,8 @@ func setMiner(ctx *cli.Context, cfg *miner.Config) {
 		log.Warn("The generic --miner.gastarget flag is deprecated and will be removed in the future!")
 	}
 
-	cfg.MaxMergedBundles = ctx.GlobalInt(MinerMaxMergedBundles.Name)
+	cfg.MaxFlashbotWorkers = ctx.GlobalInt(MinerMaxFlashbotWorkers.Name)
+	cfg.MaxEdenWorkers = ctx.GlobalInt(MinerMaxEdenWorkers.Name)
 }
 
 func setWhitelist(ctx *cli.Context, cfg *ethconfig.Config) {

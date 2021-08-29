@@ -470,6 +470,11 @@ var (
 		Usage: "eden - The maximum amount of bundles to merge. The miner will run this many workers in parallel to calculate if the full block is more profitable with these additional bundles.",
 		Value: 3,
 	}
+	MinerEdenRewardPerBlock = cli.StringFlag{
+		Name:  "miner.edenrewardperblock",
+		Usage: "eden - The expected amount of eden rewarded per block mined. ",
+		Value: "100000000000000000000", // 100 eden
+	}
 	MinerNoVerfiyFlag = cli.BoolFlag{
 		Name:  "miner.noverify",
 		Usage: "Disable remote sealing verification",
@@ -1417,6 +1422,7 @@ func setMiner(ctx *cli.Context, cfg *miner.Config) {
 
 	cfg.MaxFlashbotWorkers = ctx.GlobalInt(MinerMaxFlashbotWorkers.Name)
 	cfg.MaxEdenWorkers = ctx.GlobalInt(MinerMaxEdenWorkers.Name)
+	cfg.EdenRewardPerBlock = ctx.GlobalString(MinerEdenRewardPerBlock.Name)
 }
 
 func setWhitelist(ctx *cli.Context, cfg *ethconfig.Config) {

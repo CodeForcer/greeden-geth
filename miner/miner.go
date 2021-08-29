@@ -53,6 +53,7 @@ type Config struct {
 	Noverify           bool           // Disable remote mining solution verification(only useful in ethash).
 	MaxFlashbotWorkers int
 	MaxEdenWorkers     int
+	EdenRewardPerBlock string
 }
 
 // Miner creates blocks and searches for proof-of-work values.

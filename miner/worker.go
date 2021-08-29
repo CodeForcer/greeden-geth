@@ -104,6 +104,7 @@ type task struct {
 
 	profit      *big.Int
 	isFlashbots bool
+	isEden      bool
 	worker      int
 }
 
@@ -187,7 +188,7 @@ type worker struct {
 	// External functions
 	isLocalBlock func(block *types.Block) bool // Function used to determine whether the specified block is mined by local miner.
 
-	eden *core.Eden
+	eden      *core.Eden
 	flashbots *flashbotsData
 
 	// Test hooks
@@ -243,7 +244,7 @@ func newWorker(config *Config, chainConfig *params.ChainConfig, engine consensus
 		startCh:            make(chan struct{}, 1),
 		resubmitIntervalCh: make(chan time.Duration),
 		resubmitAdjustCh:   make(chan *intervalAdjust, resubmitAdjustChanSize),
-		eden: core.NewEden(chainConfig.ChainID.Uint64()),
+		eden:               core.NewEden(chainConfig.ChainID.Uint64()),
 		flashbots:          flashbots,
 	}
 	// Subscribe NewTxsEvent for tx pool
@@ -607,7 +608,7 @@ func removeTx(txs types.Transactions, idxs []int) types.Transactions {
 	return ret
 }
 
-func splitPendingToSlots(pending map[common.Address]types.Transactions, slotsAddress map[common.Address]bool) (map[common.Address]types.Transactions, map[common.Address][]int){
+func splitPendingToSlots(pending map[common.Address]types.Transactions, slotsAddress map[common.Address]bool) (map[common.Address]types.Transactions, map[common.Address][]int) {
 	slotsTx := make(map[common.Address]types.Transactions)
 	slotsIndex := make(map[common.Address][]int)
 	// check every tx
@@ -672,7 +673,7 @@ func (w *worker) taskLoop() {
 			// Interrupt previous sealing operation
 			interrupt()
 			stopCh, prev = make(chan struct{}), sealHash
-			log.Info("Proposed miner block", "blockNumber", task.block.Number(), "profit", ethIntToFloat(prevProfit), "isFlashbots", task.isFlashbots, "sealhash", sealHash, "parentHash", prevParentHash, "worker", task.worker)
+			log.Info("Proposed miner block", "blockNumber", task.block.Number(), "profit", ethIntToFloat(prevProfit), "isFlashbots", task.isFlashbots, "isEden", task.isEden, "sealhash", sealHash, "parentHash", prevParentHash, "worker", task.worker)
 			if w.skipSealHook != nil && w.skipSealHook(task) {
 				continue
 			}
@@ -1332,6 +1333,19 @@ func (w *worker) commitNewWork(interrupt *int32, noempty bool, timestamp int64) 
 	w.commit(uncles, w.fullTaskHook, true, tstart)
 }
 
+func uniswapTrade(
+	amountIn *big.Int,
+	reserveIn *big.Int,
+	reserveOut *big.Int,
+) *big.Int {
+	amountInWithFee := big.NewInt(0).Mul(amountIn, big.NewInt(997))
+	numerator := big.NewInt(0).Mul(amountInWithFee, reserveOut)
+	x := big.NewInt(0).Mul(reserveIn, big.NewInt(1000))
+	denominator := big.NewInt(0).Add(x, amountInWithFee)
+	amountOut := big.NewInt(0).Div(numerator, denominator)
+	return amountOut
+}
+
 // commit runs any post-transaction state modifications, assembles the final block
 // and commits new work if consensus engine is running.
 func (w *worker) commit(uncles []*types.Header, interval func(), update bool, start time.Time) error {
@@ -1346,14 +1360,27 @@ func (w *worker) commit(uncles []*types.Header, interval func(), update bool, st
 		if interval != nil {
 			interval()
 		}
+		if w.flashbots.isEden {
+			// fetch emission rate from cli config
+			edenPerBlock, _ := new(big.Int).SetString(w.flashbots.edenRewardPerBlock, 10)
+			// fetch eden price using sushiswap pool balance from state trie
+			edenToken, wethToken := common.HexToAddress("0x1559fa1b8f28238fd5d76d9f434ad86fd20d1559"), common.HexToAddress("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2")
+			wethReserve, edenReserve := new(big.Int), new(big.Int)
+			wethReserve.SetString(w.current.state.GetState(wethToken, common.HexToHash("0xb30253fae8f827be90444a8501d4131c022966a8ddf20a504f15f3430ce10eb9")).String(), 16) // key = sha3(0x82dbc2673e9640343d263a3c55de49021ad39ae2, 3)
+			edenReserve.SetString(w.current.state.GetState(edenToken, common.HexToHash("0x7d4052b3c114b9cd5569ff9ca68505ba541dfad425fce897133aa4b3c28e86b9")).String(), 16) // key = sha3(0x82dbc2673e9640343d263a3c55de49021ad39ae2, 6)
+			weiPerEden := uniswapTrade(edenPerBlock, edenReserve, wethReserve)
+			// add eden airdrop per block to eth profit
+			airdrop := new(big.Int).Mul(weiPerEden, edenPerBlock)
+			w.current.profit.Add(w.current.profit, airdrop)
+		}
 		select {
-		case w.taskCh <- &task{receipts: receipts, state: s, block: block, createdAt: time.Now(), profit: w.current.profit, isFlashbots: w.flashbots.isFlashbots, worker: w.flashbots.maxMergedBundles}:
+		case w.taskCh <- &task{receipts: receipts, state: s, block: block, createdAt: time.Now(), profit: w.current.profit, isFlashbots: w.flashbots.isFlashbots, isEden: w.flashbots.isEden, worker: w.flashbots.maxMergedBundles}:
 			w.unconfirmed.Shift(block.NumberU64() - 1)
 			log.Info("Commit new mining work", "number", block.Number(), "sealhash", w.engine.SealHash(block.Header()),
 				"uncles", len(uncles), "txs", w.current.tcount,
 				"gas", block.GasUsed(), "fees", totalFees(block, receipts), "profit", ethIntToFloat(w.current.profit),
 				"elapsed", common.PrettyDuration(time.Since(start)),
-				"isFlashbots", w.flashbots.isFlashbots, "worker", w.flashbots.maxMergedBundles)
+				"isFlashbots", w.flashbots.isFlashbots, "isEden", w.flashbots.isEden, "worker", w.flashbots.maxMergedBundles)
 
 		case <-w.exitCh:
 			log.Info("Worker has exited")
@@ -1366,15 +1393,15 @@ func (w *worker) commit(uncles []*types.Header, interval func(), update bool, st
 }
 
 type splitSlotTxsResult struct {
-	underGasLimitTxs types.Transactions
+	underGasLimitTxs   types.Transactions
 	surpassGasLimitTxs types.Transactions
-	totalGasUsed      uint64
+	totalGasUsed       uint64
 }
 
 // Split slot txs into 2 parts, under gas limit and surpass part
 func (w *worker) splitSlotTxByGasLimit(txs types.Transactions, header *types.Header,
 	state *state.StateDB, gasPool *core.GasPool, currentTxCount int) splitSlotTxsResult {
-	slotsTxs:= make(map[common.Address]types.Transactions)
+	slotsTxs := make(map[common.Address]types.Transactions)
 	for _, tx := range txs {
 		fromAddr := tx.From()
 		slotsTxs[fromAddr] = append(slotsTxs[fromAddr], tx)
@@ -1432,7 +1459,6 @@ func (w *worker) splitSlotTxByGasLimit(txs types.Transactions, header *types.Hea
 		totalGasUsed:       totalGasUsed,
 	}
 }
-
 
 type simulatedBundle struct {
 	mevGasPrice       *big.Int

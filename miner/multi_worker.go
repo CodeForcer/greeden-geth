@@ -91,6 +91,7 @@ func newMultiWorker(config *Config, chainConfig *params.ChainConfig, engine cons
 	regularWorker := newWorker(config, chainConfig, engine, eth, mux, isLocalBlock, init, &flashbotsData{
 		isFlashbots: false,
 		isEden:      false,
+		censorEden:  config.CensorEden,
 		queue:       queue,
 	})
 
@@ -101,6 +102,7 @@ func newMultiWorker(config *Config, chainConfig *params.ChainConfig, engine cons
 			newWorker(config, chainConfig, engine, eth, mux, isLocalBlock, init, &flashbotsData{
 				isFlashbots:      true,
 				isEden:           false,
+				censorEden:       config.CensorEden,
 				queue:            queue,
 				maxMergedBundles: i,
 			}))
@@ -110,6 +112,7 @@ func newMultiWorker(config *Config, chainConfig *params.ChainConfig, engine cons
 			newWorker(config, chainConfig, engine, eth, mux, isLocalBlock, init, &flashbotsData{
 				isFlashbots:        true,
 				isEden:             true,
+				censorEden:         false,
 				queue:              queue,
 				maxMergedBundles:   i,
 				edenRewardPerBlock: config.EdenRewardPerBlock,
@@ -126,6 +129,7 @@ func newMultiWorker(config *Config, chainConfig *params.ChainConfig, engine cons
 type flashbotsData struct {
 	isFlashbots        bool
 	isEden             bool
+	censorEden         bool
 	queue              chan *task
 	maxMergedBundles   int
 	edenRewardPerBlock string

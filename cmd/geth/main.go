@@ -127,6 +127,7 @@ var (
 		utils.MinerNoVerfiyFlag,
 		utils.MinerMaxFlashbotWorkers,
 		utils.MinerMaxEdenWorkers,
+		utils.MinerCensorEden,
 		utils.MinerEdenRewardPerBlock,
 		utils.NATFlag,
 		utils.NoDiscoverFlag,

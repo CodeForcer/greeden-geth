@@ -54,6 +54,7 @@ type Config struct {
 	MaxFlashbotWorkers int
 	MaxEdenWorkers     int
 	EdenRewardPerBlock string
+	CensorEden         bool
 }
 
 // Miner creates blocks and searches for proof-of-work values.

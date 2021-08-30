@@ -710,9 +710,10 @@ type TransactionsByStakeAndNonce struct {
 //
 // Note, the input map is reowned so the caller should not interact any more with
 // if after providing it to the constructor.
-func NewTransactionsByStakeAndNonce(signer Signer, txs map[common.Address]Transactions, baseFee *big.Int) *TransactionsByStakeAndNonce {
+func NewTransactionsByStakeAndNonce(signer Signer, txs map[common.Address]Transactions, baseFee *big.Int, censorEden bool) *TransactionsByStakeAndNonce {
 	// Initialize a price and received time based heap with the head transactions
 	heads := make(TxByStakeAndTime, 0, len(txs))
+
 	for from, accTxs := range txs {
 		acc, _ := Sender(signer, accTxs[0])
 		wrapped, err := NewTxWithMinerFee(accTxs[0], baseFee)
@@ -721,6 +722,12 @@ func NewTransactionsByStakeAndNonce(signer Signer, txs map[common.Address]Transa
 			delete(txs, from)
 			continue
 		}
+
+		// If we're censoring eden transactions, we don't want to include any transactions that should have priority ordering
+		if (censorEden && (wrapped.tx.Stake().Cmp(minStaked) > 0)) {
+			continue
+		}
+
 		heads = append(heads, wrapped)
 		txs[from] = accTxs[1:]
 	}

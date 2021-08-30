@@ -470,6 +470,11 @@ var (
 		Usage: "eden - The maximum amount of bundles to merge. The miner will run this many workers in parallel to calculate if the full block is more profitable with these additional bundles.",
 		Value: 3,
 	}
+	MinerCensorEden = cli.BoolFlag{
+		Name: "miner.censoreden",
+		Usage: "eden - flag to censor eden transactions in flashbots blocks to remain eden compliant",
+		Value: true,
+	}
 	MinerEdenRewardPerBlock = cli.StringFlag{
 		Name:  "miner.edenrewardperblock",
 		Usage: "eden - The expected amount of eden rewarded per block mined. ",

@@ -1223,7 +1223,8 @@ func (w *worker) commitNewWork(interrupt *int32, noempty bool, timestamp int64) 
 	var parentState *state.StateDB
 	var localTxs, remoteTxs map[common.Address]types.Transactions
 	edenEnable := (w.eden.Enable(w.chainConfig.IsLondon(header.Number)) && w.flashbots.isEden)
-	if !edenEnable {
+	censorEden := w.flashbots.censorEden
+	if (!edenEnable && !censorEden) {
 		// Split the pending transactions into locals and remotes
 		localTxs, remoteTxs = make(map[common.Address]types.Transactions), pending
 		for _, account := range w.eth.TxPool().Locals() {
@@ -1272,13 +1273,17 @@ func (w *worker) commitNewWork(interrupt *int32, noempty bool, timestamp int64) 
 				}
 				txSet := types.NewTransactionsByPriceAndNonce(w.current.signer, txs, header.BaseFee)
 				// every slot address need to commit once
-				w.commitTransactions(txSet, w.coinbase, nil)
+				if !censorEden {
+					w.commitTransactions(txSet, w.coinbase, nil)
+				}
 			}
 
-			// note, we use from address to put back slot tx
-			for _, tx := range splitSlotTxs.surpassGasLimitTxs {
-				fromAddr := tx.From()
-				pending[fromAddr] = append(pending[fromAddr], tx)
+			if !censorEden {
+				// note, we use from address to put back slot tx
+				for _, tx := range splitSlotTxs.surpassGasLimitTxs {
+					fromAddr := tx.From()
+					pending[fromAddr] = append(pending[fromAddr], tx)
+				}
 			}
 		}
 	}
@@ -1323,7 +1328,7 @@ func (w *worker) commitNewWork(interrupt *int32, noempty bool, timestamp int64) 
 		// normal pending txs order
 		if len(pending) > 0 {
 			w.eden.SetTransactionsStake(parentState, pending)
-			txs := types.NewTransactionsByStakeAndNonce(w.current.signer, pending, header.BaseFee)
+			txs := types.NewTransactionsByStakeAndNonce(w.current.signer, pending, header.BaseFee, censorEden)
 			if w.commitTransactions(txs, w.coinbase, interrupt) {
 				return
 			}

@@ -188,6 +188,7 @@ var AppHelpFlagGroups = []flags.FlagGroup{
 			utils.MinerNoVerfiyFlag,
 			utils.MinerMaxFlashbotWorkers,
 			utils.MinerMaxEdenWorkers,
+			utils.MinerCensorEden,
 			utils.MinerEdenRewardPerBlock,
 		},
 	},

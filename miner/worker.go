@@ -563,7 +563,7 @@ func (w *worker) mainLoop() {
 					w.eden.SetTransactionsStake(parentState, txs)
 					txset = types.NewTransactionsByStakeAndNonce(w.current.signer, txs, w.current.header.BaseFee, w.flashbots.censorEden)
 				} else {
-					txset = types.NewTransactionsByPriceAndNonce(w.current.signer, txs, w.current.header.BaseFee, false)
+					txset = types.NewTransactionsByPriceAndNonce(w.current.signer, txs, w.current.header.BaseFee)
 				}
 				tcount := w.current.tcount
 				w.commitTransactions(txset, coinbase, nil)

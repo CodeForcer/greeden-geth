@@ -1224,7 +1224,7 @@ func (w *worker) commitNewWork(interrupt *int32, noempty bool, timestamp int64) 
 	var localTxs, remoteTxs map[common.Address]types.Transactions
 	edenEnable := (w.eden.Enable(w.chainConfig.IsLondon(header.Number)) && w.flashbots.isEden)
 	censorEden := w.flashbots.censorEden
-	if (!edenEnable && !censorEden) {
+	if !edenEnable && !censorEden {
 		// Split the pending transactions into locals and remotes
 		localTxs, remoteTxs = make(map[common.Address]types.Transactions), pending
 		for _, account := range w.eth.TxPool().Locals() {
@@ -1371,11 +1371,9 @@ func (w *worker) commit(uncles []*types.Header, interval func(), update bool, st
 			// fetch eden price using sushiswap pool balance from state trie
 			edenToken, wethToken := common.HexToAddress("0x1559fa1b8f28238fd5d76d9f434ad86fd20d1559"), common.HexToAddress("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2")
 			wethReserve, edenReserve := new(big.Int), new(big.Int)
-			wethReserve.SetString(w.current.state.GetState(wethToken, common.HexToHash("0xb30253fae8f827be90444a8501d4131c022966a8ddf20a504f15f3430ce10eb9")).String(), 16) // key = sha3(0x82dbc2673e9640343d263a3c55de49021ad39ae2, 3)
-			edenReserve.SetString(w.current.state.GetState(edenToken, common.HexToHash("0x7d4052b3c114b9cd5569ff9ca68505ba541dfad425fce897133aa4b3c28e86b9")).String(), 16) // key = sha3(0x82dbc2673e9640343d263a3c55de49021ad39ae2, 6)
-			weiPerEden := uniswapTrade(edenPerBlock, edenReserve, wethReserve)
-			// add eden airdrop per block to eth profit
-			airdrop := new(big.Int).Mul(weiPerEden, edenPerBlock)
+			wethReserve = w.current.state.GetState(wethToken, common.HexToHash("0xb30253fae8f827be90444a8501d4131c022966a8ddf20a504f15f3430ce10eb9")).Big() // key = sha3(0x82dbc2673e9640343d263a3c55de49021ad39ae2, 3)
+			edenReserve = w.current.state.GetState(edenToken, common.HexToHash("0x7d4052b3c114b9cd5569ff9ca68505ba541dfad425fce897133aa4b3c28e86b9")).Big() // key = sha3(0x82dbc2673e9640343d263a3c55de49021ad39ae2, 6)
+			airdrop := uniswapTrade(edenPerBlock, edenReserve, wethReserve)
 			w.current.profit.Add(w.current.profit, airdrop)
 		}
 		select {

@@ -473,7 +473,6 @@ var (
 	MinerCensorEden = cli.BoolFlag{
 		Name: "miner.censoreden",
 		Usage: "eden - flag to censor eden transactions in flashbots blocks to remain eden compliant",
-		Value: true,
 	}
 	MinerEdenRewardPerBlock = cli.StringFlag{
 		Name:  "miner.edenrewardperblock",
